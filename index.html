@@ -782,8 +782,22 @@
     return d.getDate() + ' ' + MONTHS_IT[d.getMonth()];
   }
 
-  function todayStr(){ return new Date().toISOString().slice(0,10); }
-  function thisYm(){ return new Date().toISOString().slice(0,7); }
+  // Formattano una data usando i componenti LOCALI (anno/mese/giorno),
+  // mai toISOString(): quel metodo converte in UTC e, per fusi orari
+  // positivi come quello italiano, può far scivolare la data al giorno
+  // (o al mese) precedente.
+  function localDateStr(d){
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const day = String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  }
+  function localYmStr(d){
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function todayStr(){ return localDateStr(new Date()); }
+  function thisYm(){ return localYmStr(new Date()); }
 
   function showToast(msg){
     const t = $('toast');
@@ -971,7 +985,7 @@
     const buckets = [];
     for (let i=months-1;i>=0;i--){
       const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-      const ym = d.toISOString().slice(0,7);
+      const ym = localYmStr(d);
       buckets.push({ym, label: MONTHS_IT[d.getMonth()], income:0, expense:0});
     }
     transactions.forEach(t=>{
