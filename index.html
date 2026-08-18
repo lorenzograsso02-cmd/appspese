@@ -211,7 +211,14 @@
   .legend-label{ flex:1; color:var(--text); }
   .legend-pct{ color:var(--text-muted); font-family:var(--font-mono); font-size:12px; }
 
-  .bar-canvas-wrap{ width:100%; height:200px; }
+  .bar-canvas-wrap{ width:100%; height:240px; }
+
+  .mini-toggle{ display:flex; gap:8px; margin-bottom:14px; }
+  .mini-chip{
+    padding:8px 14px; border-radius:999px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--text-muted); font-size:12.5px; font-weight:600;
+  }
+  .mini-chip.active{ background:var(--gold); border-color:var(--gold); color:#1A1200; }
 
   /* EMPTY STATES */
   .empty{
@@ -231,7 +238,10 @@
     gap:12px;
     padding:13px 0;
     border-bottom:1px solid var(--line);
+    cursor:pointer;
+    border-radius:10px;
   }
+  .txn-row:active{ background:rgba(244,239,227,0.04); }
   .txn-row:last-child{ border-bottom:none; }
   .txn-icon{
     width:38px; height:38px; border-radius:50%;
@@ -485,8 +495,12 @@
   </div>
 
   <div class="section">
-    <h2 class="section-title">Andamento mensile</h2>
-    <p class="section-sub">Entrate e uscite, ultimi 6 mesi</p>
+    <h2 class="section-title">Andamento</h2>
+    <p class="section-sub" id="trendSub">Entrate e uscite, ultimi 6 mesi</p>
+    <div class="mini-toggle" id="trendToggle">
+      <button type="button" class="mini-chip active" data-gran="month">Mensile</button>
+      <button type="button" class="mini-chip" data-gran="week">Settimanale</button>
+    </div>
     <div class="card">
       <div class="bar-canvas-wrap"><canvas id="barChart"></canvas></div>
     </div>
@@ -501,6 +515,7 @@
         Tocca il pulsante + per aggiungere la tua prima spesa o guadagno.
       </div>
       <div class="txn-list" id="txnList"></div>
+      <button class="btn-secondary" id="txnExpandBtn" style="display:none;">Mostra tutte</button>
     </div>
   </div>
 
@@ -530,6 +545,7 @@
         Tocca + e scegli "Investimento" per aggiungere il primo movimento.
       </div>
       <div class="txn-list" id="investList"></div>
+      <button class="btn-secondary" id="investExpandBtn" style="display:none;">Mostra tutti</button>
     </div>
   </div>
 
@@ -572,7 +588,8 @@
       <input type="text" id="noteInput" maxlength="60" placeholder="es. Spesa settimanale">
     </div>
     <button class="btn-primary" id="saveExpense" disabled>Salva</button>
-    <button class="btn-ghost" id="cancelAdd">Annulla</button>
+    <button class="btn-ghost" id="deleteTxnBtn" style="display:none;">Elimina</button>
+    <button class="btn-ghost" id="cancelAdd" style="color:var(--text-muted); border-color:var(--line);">Annulla</button>
   </div>
 </div>
 
@@ -724,6 +741,11 @@
   let selectedType = 'expense';
   let selectedCategory = null;
   let manageType = 'expense';
+  let editingTxnId = null;
+  let formCurrency = 'EUR';
+  let trendGranularity = 'month';
+  let txnExpanded = false;
+  let investExpanded = false;
   let catEditorMode = 'create';   // 'create' | 'edit'
   let catEditorType = 'expense';
   let catEditorId = null;
@@ -963,6 +985,28 @@
     return buckets;
   }
 
+  function weeklyTrend(targetCur, weeks){
+    const now = new Date();
+    const day = now.getDay(); // 0=domenica .. 6=sabato
+    const diffToMonday = (day === 0) ? 6 : day - 1;
+    const thisMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday);
+    const buckets = [];
+    for (let i=weeks-1;i>=0;i--){
+      const start = new Date(thisMonday.getFullYear(), thisMonday.getMonth(), thisMonday.getDate() - i*7);
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+      buckets.push({ start, end, label: start.getDate() + ' ' + MONTHS_IT[start.getMonth()], income:0, expense:0 });
+    }
+    transactions.forEach(t=>{
+      if (t.type === 'investment') return;
+      const d = new Date(t.date + 'T00:00:00');
+      const b = buckets.find(b => d >= b.start && d <= b.end);
+      if (!b) return;
+      const amt = convert(t.amount, t.currency, targetCur);
+      if (t.type === 'income') b.income += amt; else b.expense += amt;
+    });
+    return buckets;
+  }
+
   // ---------- PORTFOLIO (INVESTIMENTI) ----------
   function getInvestments(){
     return transactions.filter(t=>t.type==='investment');
@@ -990,7 +1034,6 @@
   function render(){
     const cur = settings.currency;
     $('curCode').textContent = cur;
-    $('amountSym').textContent = (CURRENCY_META[cur] && CURRENCY_META[cur].symbol) || cur;
 
     const filtered = getFiltered(currentPeriod);
     const totals = computeTotals(filtered, cur);
@@ -1039,6 +1082,8 @@
         type:'doughnut',
         data,
         options:{
+          responsive:true,
+          maintainAspectRatio:false,
           cutout:'68%',
           plugins:{ legend:{display:false}, tooltip:{
             callbacks:{ label:(c)=> ' ' + fmt(c.parsed, cur) }
@@ -1059,23 +1104,27 @@
   }
 
   function renderTrendChart(cur){
-    const trend = monthlyTrend(cur, 6);
+    const trend = trendGranularity === 'week' ? weeklyTrend(cur, 8) : monthlyTrend(cur, 6);
+    $('trendSub').textContent = trendGranularity === 'week' ? 'Entrate e uscite, ultime 8 settimane' : 'Entrate e uscite, ultimi 6 mesi';
+
     const ctx = document.getElementById('barChart').getContext('2d');
     const data = {
       labels: trend.map(t=>t.label),
       datasets:[
-        { label:'Entrate', data: trend.map(t=>t.income),  backgroundColor:'#6FAE8B', borderRadius:6, maxBarThickness:22 },
-        { label:'Uscite',  data: trend.map(t=>t.expense), backgroundColor:'#E2725B', borderRadius:6, maxBarThickness:22 },
+        { label:'Entrate', data: trend.map(t=>t.income),  backgroundColor:'#6FAE8B', borderRadius:6, maxBarThickness:26 },
+        { label:'Uscite',  data: trend.map(t=>t.expense), backgroundColor:'#E2725B', borderRadius:6, maxBarThickness:26 },
       ]
     };
     const options = {
+      responsive:true,
+      maintainAspectRatio:false,
       plugins:{
         legend:{ display:true, position:'bottom', labels:{ color:'#94A0C2', font:{family:'Inter', size:11.5}, boxWidth:10, boxHeight:10, padding:14 } },
         tooltip:{ callbacks:{ label:(c)=> ' ' + c.dataset.label + ': ' + fmt(c.parsed.y, cur) } }
       },
       scales:{
-        x:{ grid:{display:false}, ticks:{color:'#94A0C2', font:{family:'Space Mono', size:11}} },
-        y:{ grid:{color:'rgba(244,239,227,0.08)'}, ticks:{color:'#94A0C2', font:{size:10},
+        x:{ grid:{display:false}, ticks:{color:'#94A0C2', font:{family:'Space Mono', size:10.5}, maxRotation:0, autoSkip:true } },
+        y:{ grid:{color:'rgba(244,239,227,0.08)'}, ticks:{color:'#94A0C2', font:{size:10}, maxTicksLimit:5,
               callback:(v)=> ((CURRENCY_META[cur]&&CURRENCY_META[cur].symbol)||cur) + v } }
       },
       animation:{ duration:400 }
@@ -1089,38 +1138,67 @@
     }
   }
 
+  document.querySelectorAll('#trendToggle .mini-chip').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      trendGranularity = btn.dataset.gran;
+      document.querySelectorAll('#trendToggle .mini-chip').forEach(b=> b.classList.toggle('active', b===btn));
+      renderTrendChart(settings.currency);
+    });
+  });
+
+  function txnRowHtml(t, cur){
+    const c = catById(t.category) || FALLBACK_CAT;
+    const converted = convert(t.amount, t.currency, cur);
+    let sign = '', amtClass = '';
+    if (t.type === 'income'){ sign = '+ '; amtClass = 'is-income'; }
+    else if (t.type === 'expense'){ sign = '− '; amtClass = 'is-expense'; }
+    else { sign = ''; amtClass = 'is-investment'; }
+    return `
+      <div class="txn-row" data-id="${t.id}">
+        <div class="txn-icon" style="background:${c.color}33; color:${c.color};">${c.icon}</div>
+        <div class="txn-info">
+          <div class="txn-cat">${c.label}</div>
+          <div class="txn-note">${t.note ? t.note : fmtDate(t.date)}</div>
+          ${t.note ? `<div class="txn-date">${fmtDate(t.date)}</div>` : ''}
+        </div>
+        <div class="txn-amount ${amtClass}">${sign}${fmt(converted, cur)}</div>
+        <button class="txn-del" data-del="${t.id}" aria-label="Elimina">✕</button>
+      </div>
+    `;
+  }
+
+  const LIST_LIMIT = 5;
+
   function renderTransactions(filtered, cur){
-    const sorted = filtered.filter(t=>t.type!=='investment').slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
+    const sortedAll = filtered.filter(t=>t.type!=='investment').slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
     const list = $('txnList');
     const empty = $('txnEmpty');
+    const expandBtn = $('txnExpandBtn');
     $('txnSub').textContent = currentPeriod === 'month' ? 'Le tue spese e i tuoi guadagni di questo mese' : 'Tutte le tue transazioni registrate';
 
-    if (sorted.length === 0){
+    if (sortedAll.length === 0){
       empty.style.display = 'block';
       list.innerHTML = '';
+      expandBtn.style.display = 'none';
       return;
     }
     empty.style.display = 'none';
 
-    list.innerHTML = sorted.map(t=>{
-      const c = catById(t.category) || FALLBACK_CAT;
-      const converted = convert(t.amount, t.currency, cur);
-      const sign = t.type === 'income' ? '+ ' : '− ';
-      const amtClass = t.type === 'income' ? 'is-income' : 'is-expense';
-      return `
-        <div class="txn-row" data-id="${t.id}">
-          <div class="txn-icon" style="background:${c.color}33; color:${c.color};">${c.icon}</div>
-          <div class="txn-info">
-            <div class="txn-cat">${c.label}</div>
-            <div class="txn-note">${t.note ? t.note : fmtDate(t.date)}</div>
-            ${t.note ? `<div class="txn-date">${fmtDate(t.date)}</div>` : ''}
-          </div>
-          <div class="txn-amount ${amtClass}">${sign}${fmt(converted, cur)}</div>
-          <button class="txn-del" data-del="${t.id}" aria-label="Elimina">✕</button>
-        </div>
-      `;
-    }).join('');
+    const visible = txnExpanded ? sortedAll : sortedAll.slice(0, LIST_LIMIT);
+    list.innerHTML = visible.map(t=> txnRowHtml(t, cur)).join('');
+
+    if (sortedAll.length > LIST_LIMIT){
+      expandBtn.style.display = 'block';
+      expandBtn.textContent = txnExpanded ? 'Mostra meno' : `Mostra tutte (${sortedAll.length})`;
+    } else {
+      expandBtn.style.display = 'none';
+    }
   }
+
+  $('txnExpandBtn').addEventListener('click', ()=>{
+    txnExpanded = !txnExpanded;
+    renderTransactions(getFiltered(currentPeriod), settings.currency);
+  });
 
   function renderPortfolio(cur){
     $('portfolioTotal').textContent = fmt(investmentTotal(cur), cur);
@@ -1159,6 +1237,8 @@
         type:'doughnut',
         data,
         options:{
+          responsive:true,
+          maintainAspectRatio:false,
           cutout:'68%',
           plugins:{ legend:{display:false}, tooltip:{
             callbacks:{ label:(c)=> ' ' + fmt(c.parsed, cur) }
@@ -1179,32 +1259,33 @@
   }
 
   function renderInvestments(cur){
-    const list = getInvestments().slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
+    const sortedAll = getInvestments().slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
     const container = $('investList');
     const empty = $('investEmpty');
-    if (list.length === 0){
+    const expandBtn = $('investExpandBtn');
+    if (sortedAll.length === 0){
       empty.style.display = 'block';
       container.innerHTML = '';
+      expandBtn.style.display = 'none';
       return;
     }
     empty.style.display = 'none';
-    container.innerHTML = list.map(t=>{
-      const c = catById(t.category) || FALLBACK_CAT;
-      const converted = convert(t.amount, t.currency, cur);
-      return `
-        <div class="txn-row" data-id="${t.id}">
-          <div class="txn-icon" style="background:${c.color}33; color:${c.color};">${c.icon}</div>
-          <div class="txn-info">
-            <div class="txn-cat">${c.label}</div>
-            <div class="txn-note">${t.note ? t.note : fmtDate(t.date)}</div>
-            ${t.note ? `<div class="txn-date">${fmtDate(t.date)}</div>` : ''}
-          </div>
-          <div class="txn-amount is-investment">${fmt(converted, cur)}</div>
-          <button class="txn-del" data-del="${t.id}" aria-label="Elimina">✕</button>
-        </div>
-      `;
-    }).join('');
+
+    const visible = investExpanded ? sortedAll : sortedAll.slice(0, LIST_LIMIT);
+    container.innerHTML = visible.map(t=> txnRowHtml(t, cur)).join('');
+
+    if (sortedAll.length > LIST_LIMIT){
+      expandBtn.style.display = 'block';
+      expandBtn.textContent = investExpanded ? 'Mostra meno' : `Mostra tutti (${sortedAll.length})`;
+    } else {
+      expandBtn.style.display = 'none';
+    }
   }
+
+  $('investExpandBtn').addEventListener('click', ()=>{
+    investExpanded = !investExpanded;
+    renderInvestments(settings.currency);
+  });
 
   // ---------- ADD TRANSACTION SHEET ----------
   function buildCatGrid(type){
@@ -1257,11 +1338,38 @@
   function openSheet(overlayId){ $(overlayId).classList.add('open'); }
   function closeSheet(overlayId){ $(overlayId).classList.remove('open'); }
 
+  function updateAmountSym(){
+    $('amountSym').textContent = (CURRENCY_META[formCurrency] && CURRENCY_META[formCurrency].symbol) || formCurrency;
+  }
+
   function resetAddForm(){
+    editingTxnId = null;
+    formCurrency = settings.currency;
     $('amountInput').value = '';
     $('noteInput').value = '';
     $('dateInput').value = todayStr();
+    $('deleteTxnBtn').style.display = 'none';
+    $('saveExpense').textContent = 'Salva';
+    updateAmountSym();
     setType('expense');
+  }
+
+  function openEditForm(tx){
+    editingTxnId = tx.id;
+    formCurrency = tx.currency;
+    setType(tx.type);
+    $('sheetTitle').textContent = tx.type === 'income' ? 'Modifica guadagno' : (tx.type === 'investment' ? 'Modifica investimento' : 'Modifica spesa');
+    $('amountInput').value = tx.amount;
+    $('noteInput').value = tx.note || '';
+    $('dateInput').value = tx.date;
+    selectedCategory = tx.category;
+    const grid = $('catGrid');
+    grid.querySelectorAll('.cat-btn').forEach(b=> b.classList.toggle('active', b.dataset.cat===tx.category));
+    $('deleteTxnBtn').style.display = 'block';
+    $('saveExpense').textContent = 'Salva modifiche';
+    updateAmountSym();
+    validateAddForm();
+    openSheet('addOverlay');
   }
 
   $('openAdd').addEventListener('click', ()=>{
@@ -1275,21 +1383,48 @@
   $('saveExpense').addEventListener('click', async ()=>{
     const amount = parseFloat($('amountInput').value);
     if (!(amount > 0) || !selectedCategory) return;
-    const tx = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
-      type: selectedType,
-      amount,
-      currency: settings.currency,
-      category: selectedCategory,
-      date: $('dateInput').value || todayStr(),
-      note: $('noteInput').value.trim(),
-      createdAt: Date.now(),
-    };
-    transactions.push(tx);
+
+    if (editingTxnId){
+      const tx = transactions.find(t=>t.id===editingTxnId);
+      if (tx){
+        tx.type = selectedType;
+        tx.amount = amount;
+        tx.currency = formCurrency;
+        tx.category = selectedCategory;
+        tx.date = $('dateInput').value || todayStr();
+        tx.note = $('noteInput').value.trim();
+      }
+      await persistTransactions();
+      closeSheet('addOverlay');
+      render();
+      showToast('Modifiche salvate');
+    } else {
+      const tx = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
+        type: selectedType,
+        amount,
+        currency: formCurrency,
+        category: selectedCategory,
+        date: $('dateInput').value || todayStr(),
+        note: $('noteInput').value.trim(),
+        createdAt: Date.now(),
+      };
+      transactions.push(tx);
+      await persistTransactions();
+      closeSheet('addOverlay');
+      render();
+      showToast(selectedType === 'income' ? 'Guadagno aggiunto' : (selectedType === 'investment' ? 'Investimento aggiunto' : 'Spesa aggiunta'));
+    }
+  });
+
+  $('deleteTxnBtn').addEventListener('click', async ()=>{
+    if (!editingTxnId) return;
+    if (!confirm('Eliminare questa transazione?')) return;
+    transactions = transactions.filter(x=>x.id!==editingTxnId);
     await persistTransactions();
     closeSheet('addOverlay');
     render();
-    showToast(selectedType === 'income' ? 'Guadagno aggiunto' : (selectedType === 'investment' ? 'Investimento aggiunto' : 'Spesa aggiunta'));
+    showToast('Transazione eliminata');
   });
 
   document.addEventListener('click', async (e)=>{
@@ -1312,6 +1447,12 @@
     const mdel = e.target.closest('[data-mdel]');
     if (mdel){
       await performDeleteCategory(manageType, mdel.dataset.mdel);
+      return;
+    }
+    const row = e.target.closest('.txn-row');
+    if (row){
+      const tx = transactions.find(t=>t.id===row.dataset.id);
+      if (tx) openEditForm(tx);
       return;
     }
   });
@@ -1461,6 +1602,7 @@
       currentPeriod = chip.dataset.period;
       document.querySelectorAll('.chip[data-period]').forEach(c=>c.classList.remove('active'));
       chip.classList.add('active');
+      txnExpanded = false;
       render();
     });
   });
