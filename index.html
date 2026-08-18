@@ -250,6 +250,7 @@
   }
   .txn-amount.is-income{ color:var(--sage); }
   .txn-amount.is-expense{ color:var(--coral); }
+  .txn-amount.is-investment{ color:var(--gold); }
   .txn-del{
     background:none; border:none; color:var(--text-muted);
     font-size:16px; padding:6px; line-height:1; flex-shrink:0;
@@ -316,12 +317,15 @@
 
   .type-toggle{ display:flex; gap:8px; margin-bottom:18px; }
   .type-btn{
-    flex:1; padding:12px; border-radius:14px;
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3px; padding:10px 4px; border-radius:14px;
     border:1px solid var(--line); background:var(--surface-2);
-    color:var(--text-muted); font-size:13.5px; font-weight:600;
+    color:var(--text-muted); font-size:11.5px; font-weight:600; text-align:center;
   }
-  .type-btn[data-type="expense"].active{ background:rgba(226,114,91,0.18); border-color:var(--coral); color:var(--text); }
-  .type-btn[data-type="income"].active{ background:rgba(111,174,139,0.18); border-color:var(--sage); color:var(--text); }
+  .type-btn .ti{ font-size:18px; line-height:1; }
+  .type-btn[data-type="expense"].active, .type-btn[data-mtype="expense"].active{ background:rgba(226,114,91,0.18); border-color:var(--coral); color:var(--text); }
+  .type-btn[data-type="income"].active, .type-btn[data-mtype="income"].active{ background:rgba(111,174,139,0.18); border-color:var(--sage); color:var(--text); }
+  .type-btn[data-type="investment"].active, .type-btn[data-mtype="investment"].active{ background:rgba(227,178,60,0.18); border-color:var(--gold); color:var(--text); }
 
   .amount-input-row{
     display:flex; align-items:center; gap:8px;
@@ -330,6 +334,7 @@
   }
   .amount-input-row span{ font-family:var(--font-mono); font-size:22px; color:var(--text-muted); }
   .amount-input-row.income span{ color:var(--sage); }
+  .amount-input-row.investment span{ color:var(--gold); }
   .amount-input-row input{
     border:none; background:none; color:var(--text);
     font-family:var(--font-display); font-size:26px; font-weight:600;
@@ -349,6 +354,45 @@
   }
   .cat-btn .em{ font-size:19px; display:block; margin-bottom:4px; }
   .cat-btn.active{ border-color:var(--gold); background:rgba(227,178,60,0.14); color:var(--text); }
+  .cat-btn.add{ border-style:dashed; color:var(--text-muted); }
+
+  .field-label-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .field-label-row label{ margin-bottom:0; }
+  .manage-link{
+    background:none; border:none; color:var(--gold);
+    font-size:12px; font-weight:600; padding:4px 6px; border-radius:8px;
+  }
+
+  .icon-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; max-height:170px; overflow-y:auto; }
+  .icon-btn{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:10px;
+    font-size:17px; padding:8px 0;
+  }
+  .icon-btn.active{ border-color:var(--gold); background:rgba(227,178,60,0.16); }
+  .color-swatches{ display:flex; gap:10px; flex-wrap:wrap; }
+  .swatch{ width:30px; height:30px; border-radius:50%; border:2px solid transparent; }
+  .swatch.active{ border-color:var(--text); }
+
+  .manage-list{ display:flex; flex-direction:column; margin-bottom:6px; }
+  .manage-row{
+    display:flex; align-items:center; gap:10px; padding:10px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .manage-row:last-child{ border-bottom:none; }
+  .manage-row .mr-icon{
+    width:34px; height:34px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-size:15px; flex-shrink:0;
+  }
+  .manage-row .mr-label{ flex:1; font-size:14px; font-weight:600; }
+  .manage-row .mr-btn{ background:none; border:none; color:var(--text-muted); font-size:15px; padding:6px; }
+  .manage-row .mr-btn.del:active{ color:var(--coral); }
+  .manage-row .mr-btn.edit:active{ color:var(--gold); }
+
+  .portfolio-amount{
+    font-family:var(--font-display); font-weight:600; font-size:32px;
+    color:var(--gold); margin:0 0 14px;
+  }
 
   .btn-primary{
     width:100%; padding:15px; border:none; border-radius:14px;
@@ -396,7 +440,7 @@
 
   <div class="topbar">
     <div>
-      <p class="eyebrow">Riepilogo spese</p>
+      <p class="eyebrow">Spese, guadagni e investimenti</p>
       <h1>Le Mie Spese</h1>
     </div>
     <button class="currency-badge" id="openCurrency">💱 <span id="curCode">EUR</span></button>
@@ -460,6 +504,35 @@
     </div>
   </div>
 
+  <div class="section">
+    <h2 class="section-title">Portafoglio</h2>
+    <p class="section-sub">Il totale investito, suddiviso per categoria</p>
+    <div class="card">
+      <p class="section-sub" style="margin-bottom:6px;">Totale investito</p>
+      <p class="portfolio-amount" id="portfolioTotal">—</p>
+      <div class="empty" id="portfolioEmpty">
+        <span class="glyph">📈</span>
+        Nessun investimento registrato ancora.
+      </div>
+      <div class="donut-row" id="portfolioDonutRow" style="display:none;">
+        <div class="donut-canvas-wrap"><canvas id="portfolioDonutChart"></canvas></div>
+        <div class="legend" id="portfolioLegendList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Movimenti portafoglio</h2>
+    <p class="section-sub">I versamenti registrati nel tuo portafoglio</p>
+    <div class="card">
+      <div class="empty" id="investEmpty">
+        <span class="glyph">💹</span>
+        Tocca + e scegli "Investimento" per aggiungere il primo movimento.
+      </div>
+      <div class="txn-list" id="investList"></div>
+    </div>
+  </div>
+
 </div>
 
 <button class="fab" id="openAdd" aria-label="Aggiungi spesa o guadagno">+</button>
@@ -471,8 +544,9 @@
     <h2 id="sheetTitle">Nuova spesa</h2>
 
     <div class="type-toggle" id="typeToggle">
-      <button type="button" class="type-btn active" data-type="expense">📤 Spesa</button>
-      <button type="button" class="type-btn" data-type="income">📥 Guadagno</button>
+      <button type="button" class="type-btn active" data-type="expense"><span class="ti">📤</span>Spesa</button>
+      <button type="button" class="type-btn" data-type="income"><span class="ti">📥</span>Guadagno</button>
+      <button type="button" class="type-btn" data-type="investment"><span class="ti">📈</span>Investim.</button>
     </div>
 
     <div class="field">
@@ -483,7 +557,10 @@
       </div>
     </div>
     <div class="field">
-      <label>Categoria</label>
+      <div class="field-label-row">
+        <label>Categoria</label>
+        <button type="button" class="manage-link" id="manageCatsBtn">Gestisci</button>
+      </div>
       <div class="cat-grid" id="catGrid"></div>
     </div>
     <div class="field">
@@ -514,11 +591,50 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- MANAGE CATEGORIES SHEET -->
+<div class="overlay" id="manageCatOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2>Gestisci categorie</h2>
+    <div class="type-toggle" id="manageTypeToggle">
+      <button type="button" class="type-btn active" data-mtype="expense"><span class="ti">📤</span>Spese</button>
+      <button type="button" class="type-btn" data-mtype="income"><span class="ti">📥</span>Entrate</button>
+      <button type="button" class="type-btn" data-mtype="investment"><span class="ti">📈</span>Investim.</button>
+    </div>
+    <div class="manage-list" id="manageList"></div>
+    <button class="btn-secondary" id="addCatFromManage">+ Nuova categoria</button>
+    <button class="btn-ghost" id="closeManageBtn" style="color:var(--text-muted); border-color:var(--line);">Chiudi</button>
+  </div>
+</div>
+
+<!-- CATEGORY EDITOR SHEET -->
+<div class="overlay" id="catEditorOverlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 id="catEditorTitle">Nuova categoria</h2>
+    <div class="field">
+      <label for="catNameInput">Nome</label>
+      <input type="text" id="catNameInput" maxlength="24" placeholder="es. Palestra">
+    </div>
+    <div class="field">
+      <label>Icona</label>
+      <div class="icon-grid" id="iconGrid"></div>
+    </div>
+    <div class="field">
+      <label>Colore</label>
+      <div class="color-swatches" id="colorSwatches"></div>
+    </div>
+    <button class="btn-primary" id="saveCatBtn" disabled>Crea categoria</button>
+    <button class="btn-ghost" id="deleteCatBtn" style="display:none;">Elimina categoria</button>
+    <button class="btn-ghost" id="cancelCatEditor" style="color:var(--text-muted); border-color:var(--line);">Annulla</button>
+  </div>
+</div>
+
 <script>
 (function(){
   "use strict";
 
-  const EXPENSE_CATEGORIES = [
+  const DEFAULT_EXPENSE_CATEGORIES = [
     {id:'alimentari', label:'Alimentari', icon:'🛒', color:'#E3B23C'},
     {id:'trasporti',  label:'Trasporti',  icon:'🚗', color:'#6FAE8B'},
     {id:'casa',       label:'Casa & Bollette', icon:'🏠', color:'#7C9CBF'},
@@ -529,16 +645,29 @@
     {id:'altro',      label:'Altro',      icon:'✳️', color:'#8A93AD'},
   ];
 
-  const INCOME_CATEGORIES = [
+  const DEFAULT_INCOME_CATEGORIES = [
     {id:'stipendio',     label:'Stipendio',     icon:'💼', color:'#6FAE8B'},
     {id:'vendita',       label:'Vendita',       icon:'🏷️', color:'#4FB0A5'},
     {id:'regalo',        label:'Regalo',        icon:'🎁', color:'#9B8AC4'},
     {id:'rimborso',      label:'Rimborso',      icon:'💳', color:'#7C9CBF'},
-    {id:'investimenti',  label:'Investimenti',  icon:'📈', color:'#E3B23C'},
+    {id:'investimenti',  label:'Rendita investimenti', icon:'📈', color:'#E3B23C'},
     {id:'altro_entrata', label:'Altro',         icon:'✳️', color:'#8A93AD'},
   ];
 
-  const ALL_CATEGORIES = EXPENSE_CATEGORIES.concat(INCOME_CATEGORIES);
+  const DEFAULT_INVESTMENT_CATEGORIES = [
+    {id:'azioni',              label:'Azioni',         icon:'📈', color:'#E3B23C'},
+    {id:'crypto',               label:'Crypto',         icon:'₿',  color:'#4FB0A5'},
+    {id:'obbligazioni',         label:'Obbligazioni',   icon:'🏦', color:'#7C9CBF'},
+    {id:'immobili_investimento',label:'Immobili',       icon:'🏢', color:'#D98BA0'},
+    {id:'fondi',                label:'Fondi & ETF',    icon:'📊', color:'#9B8AC4'},
+    {id:'liquidita',            label:'Liquidità',      icon:'💰', color:'#6FAE8B'},
+    {id:'altro_investimento',   label:'Altro',          icon:'✳️', color:'#8A93AD'},
+  ];
+
+  const FALLBACK_CAT = {label:'Categoria eliminata', icon:'🏷️', color:'#8A93AD'};
+
+  const CATEGORY_ICONS = ['🛒','🚗','🏠','💊','🎬','🛍️','📚','✳️','💼','🏷️','🎁','💳','📈','₿','🏦','🏢','📊','💰','🍽️','☕','✈️','🎓','👕','🐾','🎵','📱','🧾','🎉'];
+  const CATEGORY_COLORS = ['#E3B23C','#6FAE8B','#E2725B','#7C9CBF','#9B8AC4','#D98BA0','#4FB0A5','#8A93AD'];
 
   // Metadata for currencies we may receive from the exchange-rate API (ECB reference list)
   const CURRENCY_META = {
@@ -587,18 +716,28 @@
   const MONTHS_IT = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
 
   let transactions = [];       // {id, type, amount, currency, category, date, note, createdAt}
+  let categories = {expense:[], income:[], investment:[]};
   let settings = {currency:'EUR'};
   let exchangeRates = {EUR:1}; // code -> units per 1 EUR
   let ratesMeta = {fetchedAt:0, rateDate:null, source:'fallback'};
   let currentPeriod = 'month';
   let selectedType = 'expense';
   let selectedCategory = null;
+  let manageType = 'expense';
+  let catEditorMode = 'create';   // 'create' | 'edit'
+  let catEditorType = 'expense';
+  let catEditorId = null;
+  let catEditorIcon = '🏷️';
+  let catEditorColor = '#8A93AD';
   let donutChart = null;
   let barChart = null;
+  let portfolioChart = null;
 
   const $ = (id) => document.getElementById(id);
 
-  function catById(id){ return ALL_CATEGORIES.find(c=>c.id===id); }
+  function catById(id){
+    return categories.expense.concat(categories.income, categories.investment).find(c=>c.id===id);
+  }
 
   function convert(amount, from, to){
     const rf = exchangeRates[from] != null ? exchangeRates[from] : 1;
@@ -711,7 +850,43 @@
   }
 
   // ---------- STORAGE ----------
+  async function loadCategories(){
+    try{
+      const raw = localStorage.getItem('categories');
+      if (raw){
+        const parsed = JSON.parse(raw);
+        categories = {
+          expense: parsed.expense || DEFAULT_EXPENSE_CATEGORIES.slice(),
+          income: parsed.income || DEFAULT_INCOME_CATEGORIES.slice(),
+          investment: parsed.investment || DEFAULT_INVESTMENT_CATEGORIES.slice(),
+        };
+      } else {
+        // Prima volta: creiamo le categorie usando esattamente gli stessi
+        // id/etichette/icone di prima, cosi' le transazioni gia' salvate
+        // continuano a essere visualizzate correttamente.
+        categories = {
+          expense: DEFAULT_EXPENSE_CATEGORIES.slice(),
+          income: DEFAULT_INCOME_CATEGORIES.slice(),
+          investment: DEFAULT_INVESTMENT_CATEGORIES.slice(),
+        };
+        await persistCategories();
+      }
+    }catch(e){
+      categories = {
+        expense: DEFAULT_EXPENSE_CATEGORIES.slice(),
+        income: DEFAULT_INCOME_CATEGORIES.slice(),
+        investment: DEFAULT_INVESTMENT_CATEGORIES.slice(),
+      };
+    }
+  }
+
+  async function persistCategories(){
+    try{ localStorage.setItem('categories', JSON.stringify(categories)); }
+    catch(e){ console.error('storage error', e); showToast('Errore nel salvataggio'); }
+  }
+
   async function loadAll(){
+    await loadCategories();
     try{
       const raw = localStorage.getItem('expenses');
       transactions = raw ? JSON.parse(raw) : [];
@@ -748,6 +923,7 @@
   function computeTotals(list, cur){
     let income = 0, expense = 0;
     list.forEach(t=>{
+      if (t.type === 'investment') return; // il portafoglio si segue separatamente
       const amt = convert(t.amount, t.currency, cur);
       if (t.type === 'income') income += amt; else expense += amt;
     });
@@ -761,7 +937,7 @@
       map[t.category] = (map[t.category]||0) + amt;
     });
     const total = Object.values(map).reduce((a,b)=>a+b,0);
-    return EXPENSE_CATEGORIES.map(c=>({
+    return categories.expense.map(c=>({
       ...c,
       amount: map[c.id]||0,
       pct: total>0 ? (map[c.id]||0)/total*100 : 0
@@ -777,6 +953,7 @@
       buckets.push({ym, label: MONTHS_IT[d.getMonth()], income:0, expense:0});
     }
     transactions.forEach(t=>{
+      if (t.type === 'investment') return;
       const ym = t.date.slice(0,7);
       const b = buckets.find(b=>b.ym===ym);
       if (!b) return;
@@ -784,6 +961,29 @@
       if (t.type === 'income') b.income += amt; else b.expense += amt;
     });
     return buckets;
+  }
+
+  // ---------- PORTFOLIO (INVESTIMENTI) ----------
+  function getInvestments(){
+    return transactions.filter(t=>t.type==='investment');
+  }
+
+  function investmentTotal(cur){
+    return getInvestments().reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
+  }
+
+  function investmentBreakdown(targetCur){
+    const map = {};
+    getInvestments().forEach(t=>{
+      const amt = convert(t.amount, t.currency, targetCur);
+      map[t.category] = (map[t.category]||0) + amt;
+    });
+    const total = Object.values(map).reduce((a,b)=>a+b,0);
+    return categories.investment.map(c=>({
+      ...c,
+      amount: map[c.id]||0,
+      pct: total>0 ? (map[c.id]||0)/total*100 : 0
+    })).filter(c=>c.amount>0).sort((a,b)=>b.amount-a.amount);
   }
 
   // ---------- RENDER ----------
@@ -805,6 +1005,7 @@
     renderCategoryChart(filtered, cur);
     renderTrendChart(cur);
     renderTransactions(filtered, cur);
+    renderPortfolio(cur);
   }
 
   function renderCategoryChart(filtered, cur){
@@ -889,7 +1090,7 @@
   }
 
   function renderTransactions(filtered, cur){
-    const sorted = filtered.slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
+    const sorted = filtered.filter(t=>t.type!=='investment').slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
     const list = $('txnList');
     const empty = $('txnEmpty');
     $('txnSub').textContent = currentPeriod === 'month' ? 'Le tue spese e i tuoi guadagni di questo mese' : 'Tutte le tue transazioni registrate';
@@ -902,7 +1103,7 @@
     empty.style.display = 'none';
 
     list.innerHTML = sorted.map(t=>{
-      const c = catById(t.category) || (t.type==='income' ? INCOME_CATEGORIES[INCOME_CATEGORIES.length-1] : EXPENSE_CATEGORIES[EXPENSE_CATEGORIES.length-1]);
+      const c = catById(t.category) || FALLBACK_CAT;
       const converted = convert(t.amount, t.currency, cur);
       const sign = t.type === 'income' ? '+ ' : '− ';
       const amtClass = t.type === 'income' ? 'is-income' : 'is-expense';
@@ -921,16 +1122,101 @@
     }).join('');
   }
 
+  function renderPortfolio(cur){
+    $('portfolioTotal').textContent = fmt(investmentTotal(cur), cur);
+    renderPortfolioChart(cur);
+    renderInvestments(cur);
+  }
+
+  function renderPortfolioChart(cur){
+    const breakdown = investmentBreakdown(cur);
+    const empty = $('portfolioEmpty');
+    const row = $('portfolioDonutRow');
+    if (breakdown.length === 0){
+      empty.style.display = 'block';
+      row.style.display = 'none';
+      if (portfolioChart){ portfolioChart.destroy(); portfolioChart = null; }
+      return;
+    }
+    empty.style.display = 'none';
+    row.style.display = 'flex';
+
+    const ctx = document.getElementById('portfolioDonutChart').getContext('2d');
+    const data = {
+      labels: breakdown.map(b=>b.label),
+      datasets: [{
+        data: breakdown.map(b=>b.amount),
+        backgroundColor: breakdown.map(b=>b.color),
+        borderColor: '#16223F',
+        borderWidth: 2,
+      }]
+    };
+    if (portfolioChart){
+      portfolioChart.data = data;
+      portfolioChart.update();
+    } else {
+      portfolioChart = new Chart(ctx, {
+        type:'doughnut',
+        data,
+        options:{
+          cutout:'68%',
+          plugins:{ legend:{display:false}, tooltip:{
+            callbacks:{ label:(c)=> ' ' + fmt(c.parsed, cur) }
+          }},
+          animation:{ duration:400 }
+        }
+      });
+    }
+
+    const legend = $('portfolioLegendList');
+    legend.innerHTML = breakdown.map(b => `
+      <div class="legend-item">
+        <span class="legend-dot" style="background:${b.color}"></span>
+        <span class="legend-label">${b.icon} ${b.label}</span>
+        <span class="legend-pct">${b.pct.toFixed(0)}%</span>
+      </div>
+    `).join('');
+  }
+
+  function renderInvestments(cur){
+    const list = getInvestments().slice().sort((a,b)=> b.date.localeCompare(a.date) || (b.createdAt-a.createdAt));
+    const container = $('investList');
+    const empty = $('investEmpty');
+    if (list.length === 0){
+      empty.style.display = 'block';
+      container.innerHTML = '';
+      return;
+    }
+    empty.style.display = 'none';
+    container.innerHTML = list.map(t=>{
+      const c = catById(t.category) || FALLBACK_CAT;
+      const converted = convert(t.amount, t.currency, cur);
+      return `
+        <div class="txn-row" data-id="${t.id}">
+          <div class="txn-icon" style="background:${c.color}33; color:${c.color};">${c.icon}</div>
+          <div class="txn-info">
+            <div class="txn-cat">${c.label}</div>
+            <div class="txn-note">${t.note ? t.note : fmtDate(t.date)}</div>
+            ${t.note ? `<div class="txn-date">${fmtDate(t.date)}</div>` : ''}
+          </div>
+          <div class="txn-amount is-investment">${fmt(converted, cur)}</div>
+          <button class="txn-del" data-del="${t.id}" aria-label="Elimina">✕</button>
+        </div>
+      `;
+    }).join('');
+  }
+
   // ---------- ADD TRANSACTION SHEET ----------
   function buildCatGrid(type){
-    const cats = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    const cats = categories[type] || [];
     const grid = $('catGrid');
     grid.innerHTML = cats.map(c=>`
       <button type="button" class="cat-btn" data-cat="${c.id}">
         <span class="em">${c.icon}</span>${c.label}
       </button>
-    `).join('');
-    grid.querySelectorAll('.cat-btn').forEach(btn=>{
+    `).join('') + `<button type="button" class="cat-btn add" id="addCatTile"><span class="em">➕</span>Nuova</button>`;
+
+    grid.querySelectorAll('.cat-btn[data-cat]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         selectedCategory = btn.dataset.cat;
         grid.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
@@ -938,19 +1224,28 @@
         validateAddForm();
       });
     });
+    const addTile = $('addCatTile');
+    if (addTile) addTile.addEventListener('click', ()=> openCategoryEditor(type, null));
+
+    if (selectedCategory){
+      const activeBtn = grid.querySelector(`.cat-btn[data-cat="${selectedCategory}"]`);
+      if (activeBtn) activeBtn.classList.add('active');
+    }
   }
 
   function setType(type){
     selectedType = type;
-    document.querySelectorAll('.type-btn').forEach(b=> b.classList.toggle('active', b.dataset.type===type));
-    $('sheetTitle').textContent = type === 'income' ? 'Nuovo guadagno' : 'Nuova spesa';
-    $('amountRow').classList.toggle('income', type==='income');
+    document.querySelectorAll('#typeToggle .type-btn').forEach(b=> b.classList.toggle('active', b.dataset.type===type));
+    $('sheetTitle').textContent = type === 'income' ? 'Nuovo guadagno' : (type === 'investment' ? 'Nuovo investimento' : 'Nuova spesa');
+    $('amountRow').classList.remove('income','investment');
+    if (type === 'income') $('amountRow').classList.add('income');
+    if (type === 'investment') $('amountRow').classList.add('investment');
     selectedCategory = null;
     buildCatGrid(type);
     validateAddForm();
   }
 
-  document.querySelectorAll('.type-btn').forEach(btn=>{
+  document.querySelectorAll('#typeToggle .type-btn').forEach(btn=>{
     btn.addEventListener('click', ()=> setType(btn.dataset.type));
   });
 
@@ -994,19 +1289,171 @@
     await persistTransactions();
     closeSheet('addOverlay');
     render();
-    showToast(selectedType === 'income' ? 'Guadagno aggiunto' : 'Spesa aggiunta');
+    showToast(selectedType === 'income' ? 'Guadagno aggiunto' : (selectedType === 'investment' ? 'Investimento aggiunto' : 'Spesa aggiunta'));
   });
 
   document.addEventListener('click', async (e)=>{
     const del = e.target.closest('[data-del]');
-    if (!del) return;
-    const id = del.dataset.del;
-    if (!confirm('Eliminare questa transazione?')) return;
-    transactions = transactions.filter(x=>x.id!==id);
-    await persistTransactions();
-    render();
-    showToast('Transazione eliminata');
+    if (del){
+      const id = del.dataset.del;
+      if (!confirm('Eliminare questa transazione?')) return;
+      transactions = transactions.filter(x=>x.id!==id);
+      await persistTransactions();
+      render();
+      showToast('Transazione eliminata');
+      return;
+    }
+    const medit = e.target.closest('[data-edit]');
+    if (medit){
+      const cat = (categories[manageType]||[]).find(c=>c.id===medit.dataset.edit);
+      if (cat) openCategoryEditor(manageType, cat);
+      return;
+    }
+    const mdel = e.target.closest('[data-mdel]');
+    if (mdel){
+      await performDeleteCategory(manageType, mdel.dataset.mdel);
+      return;
+    }
   });
+
+  // ---------- CATEGORY MANAGEMENT ----------
+  function slugify(s){
+    return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'categoria';
+  }
+
+  async function performDeleteCategory(type, id){
+    const list = categories[type] || [];
+    if (list.length <= 1){ showToast('Deve rimanere almeno una categoria'); return; }
+    const usage = transactions.filter(t=>t.category===id).length;
+    const msg = usage > 0
+      ? `Questa categoria è usata in ${usage} transazion${usage===1?'e':'i'}. Se la elimini verranno mostrate come "Categoria eliminata". Continuare?`
+      : 'Eliminare questa categoria?';
+    if (!confirm(msg)) return;
+    categories[type] = list.filter(c=>c.id!==id);
+    await persistCategories();
+    if (selectedCategory === id) selectedCategory = null;
+    if (type === selectedType) buildCatGrid(selectedType);
+    if ($('manageCatOverlay').classList.contains('open')) buildManageList();
+    render();
+    showToast('Categoria eliminata');
+  }
+
+  function buildIconGrid(){
+    const grid = $('iconGrid');
+    grid.innerHTML = CATEGORY_ICONS.map(ic => `
+      <button type="button" class="icon-btn ${ic===catEditorIcon?'active':''}" data-icon="${ic}">${ic}</button>
+    `).join('');
+    grid.querySelectorAll('.icon-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        catEditorIcon = btn.dataset.icon;
+        grid.querySelectorAll('.icon-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  }
+
+  function buildColorSwatches(){
+    const wrap = $('colorSwatches');
+    wrap.innerHTML = CATEGORY_COLORS.map(col => `
+      <button type="button" class="swatch ${col===catEditorColor?'active':''}" data-color="${col}" style="background:${col};"></button>
+    `).join('');
+    wrap.querySelectorAll('.swatch').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        catEditorColor = btn.dataset.color;
+        wrap.querySelectorAll('.swatch').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+  }
+
+  function openCategoryEditor(type, existingCat){
+    catEditorType = type;
+    catEditorMode = existingCat ? 'edit' : 'create';
+    catEditorId = existingCat ? existingCat.id : null;
+    catEditorIcon = existingCat ? existingCat.icon : '🏷️';
+    catEditorColor = existingCat ? existingCat.color : '#8A93AD';
+    $('catNameInput').value = existingCat ? existingCat.label : '';
+    $('catEditorTitle').textContent = existingCat ? 'Modifica categoria' : 'Nuova categoria';
+    $('saveCatBtn').textContent = existingCat ? 'Salva modifiche' : 'Crea categoria';
+    $('deleteCatBtn').style.display = existingCat ? 'block' : 'none';
+    buildIconGrid();
+    buildColorSwatches();
+    validateCatEditor();
+    openSheet('catEditorOverlay');
+  }
+
+  function validateCatEditor(){
+    $('saveCatBtn').disabled = !$('catNameInput').value.trim();
+  }
+  $('catNameInput').addEventListener('input', validateCatEditor);
+  $('cancelCatEditor').addEventListener('click', ()=> closeSheet('catEditorOverlay'));
+  $('catEditorOverlay').addEventListener('click', (e)=>{ if (e.target.id==='catEditorOverlay') closeSheet('catEditorOverlay'); });
+
+  $('saveCatBtn').addEventListener('click', async ()=>{
+    const label = $('catNameInput').value.trim();
+    if (!label) return;
+    let newCat = null;
+    if (catEditorMode === 'create'){
+      newCat = { id: slugify(label) + '-' + Math.random().toString(36).slice(2,6), label, icon: catEditorIcon, color: catEditorColor };
+      categories[catEditorType].push(newCat);
+    } else {
+      const cat = categories[catEditorType].find(c=>c.id===catEditorId);
+      if (cat){ cat.label = label; cat.icon = catEditorIcon; cat.color = catEditorColor; }
+    }
+    await persistCategories();
+    closeSheet('catEditorOverlay');
+
+    if (catEditorType === selectedType){
+      buildCatGrid(selectedType);
+      if (newCat){
+        selectedCategory = newCat.id;
+        const btn = document.querySelector(`#catGrid .cat-btn[data-cat="${newCat.id}"]`);
+        if (btn){ document.querySelectorAll('#catGrid .cat-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
+        validateAddForm();
+      }
+    }
+    if ($('manageCatOverlay').classList.contains('open')) buildManageList();
+    render();
+    showToast(catEditorMode === 'create' ? 'Categoria creata' : 'Categoria aggiornata');
+  });
+
+  $('deleteCatBtn').addEventListener('click', async ()=>{
+    if (!catEditorId) return;
+    await performDeleteCategory(catEditorType, catEditorId);
+    closeSheet('catEditorOverlay');
+  });
+
+  // ---------- MANAGE CATEGORIES SHEET ----------
+  function buildManageList(){
+    const list = $('manageList');
+    list.innerHTML = (categories[manageType]||[]).map(c=>`
+      <div class="manage-row" data-id="${c.id}">
+        <span class="mr-icon" style="background:${c.color}33; color:${c.color};">${c.icon}</span>
+        <span class="mr-label">${c.label}</span>
+        <button type="button" class="mr-btn edit" data-edit="${c.id}" aria-label="Modifica">✎</button>
+        <button type="button" class="mr-btn del" data-mdel="${c.id}" aria-label="Elimina">✕</button>
+      </div>
+    `).join('');
+  }
+
+  document.querySelectorAll('#manageTypeToggle .type-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      manageType = btn.dataset.mtype;
+      document.querySelectorAll('#manageTypeToggle .type-btn').forEach(b=> b.classList.toggle('active', b===btn));
+      buildManageList();
+    });
+  });
+
+  $('manageCatsBtn').addEventListener('click', ()=>{
+    manageType = selectedType;
+    document.querySelectorAll('#manageTypeToggle .type-btn').forEach(b=> b.classList.toggle('active', b.dataset.mtype===manageType));
+    buildManageList();
+    openSheet('manageCatOverlay');
+  });
+  $('addCatFromManage').addEventListener('click', ()=> openCategoryEditor(manageType, null));
+  $('closeManageBtn').addEventListener('click', ()=> closeSheet('manageCatOverlay'));
+  $('manageCatOverlay').addEventListener('click', (e)=>{ if (e.target.id==='manageCatOverlay') closeSheet('manageCatOverlay'); });
 
   // ---------- PERIOD TOGGLE ----------
   document.querySelectorAll('.chip[data-period]').forEach(chip=>{
@@ -1072,7 +1519,6 @@
   });
 
   // ---------- INIT ----------
-  buildCatGrid('expense');
   $('dateInput').value = todayStr();
   loadAll();
 
