@@ -161,6 +161,22 @@
     gap:8px;
     padding:0 20px 4px;
   }
+  .month-nav{
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    padding:10px 20px 4px;
+  }
+  .month-nav-btn{
+    width:34px; height:34px; border-radius:50%; flex-shrink:0;
+    border:1px solid var(--line); background:var(--surface-2);
+    color:var(--text); font-size:18px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .month-nav-btn:disabled{ opacity:0.3; }
+  .month-nav-btn:active{ transform:scale(0.94); }
+  .month-nav-label{
+    font-family:var(--font-display); font-weight:600; font-size:15px;
+    min-width:150px; text-align:center; text-transform:capitalize;
+  }
   .chip{
     flex:1;
     text-align:center;
@@ -474,9 +490,14 @@
     </div>
   </div>
 
-  <div class="period-toggle">
-    <button class="chip active" data-period="month">Questo mese</button>
-    <button class="chip" data-period="all">Totale</button>
+  <div class="period-toggle" id="periodModeToggle">
+    <button type="button" class="chip active" data-mode="month">Mensile</button>
+    <button type="button" class="chip" data-mode="all">Totale</button>
+  </div>
+  <div class="month-nav" id="monthNav">
+    <button type="button" class="month-nav-btn" id="prevMonthBtn" aria-label="Mese precedente">‹</button>
+    <span class="month-nav-label" id="monthNavLabel">—</span>
+    <button type="button" class="month-nav-btn" id="nextMonthBtn" aria-label="Mese successivo">›</button>
   </div>
 
   <div class="section">
@@ -731,13 +752,15 @@
   const PRIORITY_ORDER = ['EUR','USD','GBP','CHF','CZK','ISK','DKK','NOK','SEK','PLN','HUF','RON'];
 
   const MONTHS_IT = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  const MONTHS_IT_FULL = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
 
   let transactions = [];       // {id, type, amount, currency, category, date, note, createdAt}
   let categories = {expense:[], income:[], investment:[]};
   let settings = {currency:'EUR'};
   let exchangeRates = {EUR:1}; // code -> units per 1 EUR
   let ratesMeta = {fetchedAt:0, rateDate:null, source:'fallback'};
-  let currentPeriod = 'month';
+  let periodMode = 'month';
+  let viewMonth = new Date();
   let selectedType = 'expense';
   let selectedCategory = null;
   let manageType = 'expense';
@@ -948,9 +971,19 @@
   }
 
   // ---------- DATA HELPERS ----------
-  function getFiltered(period){
-    if (period === 'month'){
-      const ym = thisYm();
+  function monthLabel(d){
+    const s = MONTHS_IT_FULL[d.getMonth()] + ' ' + d.getFullYear();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function isCurrentMonth(d){
+    const now = new Date();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }
+
+  function getFiltered(){
+    if (periodMode === 'month'){
+      const ym = localYmStr(viewMonth);
       return transactions.filter(t => t.date.slice(0,7) === ym);
     }
     return transactions.slice();
@@ -1049,10 +1082,10 @@
     const cur = settings.currency;
     $('curCode').textContent = cur;
 
-    const filtered = getFiltered(currentPeriod);
+    const filtered = getFiltered();
     const totals = computeTotals(filtered, cur);
 
-    $('ledgerLabel').textContent = currentPeriod === 'month' ? 'Bilancio di questo mese' : 'Bilancio totale';
+    $('ledgerLabel').textContent = periodMode === 'month' ? 'Bilancio di ' + monthLabel(viewMonth) : 'Bilancio totale';
     $('ledgerAmount').textContent = fmt(totals.balance, cur);
     $('ledgerAmount').style.color = totals.balance >= 0 ? 'var(--sage)' : 'var(--coral)';
     $('incomeAmount').textContent = '+ ' + fmt(totals.income, cur);
@@ -1188,7 +1221,7 @@
     const list = $('txnList');
     const empty = $('txnEmpty');
     const expandBtn = $('txnExpandBtn');
-    $('txnSub').textContent = currentPeriod === 'month' ? 'Le tue spese e i tuoi guadagni di questo mese' : 'Tutte le tue transazioni registrate';
+    $('txnSub').textContent = periodMode === 'month' ? 'Le tue spese e i tuoi guadagni di ' + monthLabel(viewMonth).toLowerCase() : 'Tutte le tue transazioni registrate';
 
     if (sortedAll.length === 0){
       empty.style.display = 'block';
@@ -1211,7 +1244,7 @@
 
   $('txnExpandBtn').addEventListener('click', ()=>{
     txnExpanded = !txnExpanded;
-    renderTransactions(getFiltered(currentPeriod), settings.currency);
+    renderTransactions(getFiltered(), settings.currency);
   });
 
   function renderPortfolio(cur){
@@ -1610,16 +1643,38 @@
   $('closeManageBtn').addEventListener('click', ()=> closeSheet('manageCatOverlay'));
   $('manageCatOverlay').addEventListener('click', (e)=>{ if (e.target.id==='manageCatOverlay') closeSheet('manageCatOverlay'); });
 
-  // ---------- PERIOD TOGGLE ----------
-  document.querySelectorAll('.chip[data-period]').forEach(chip=>{
+  // ---------- PERIOD MODE + MONTH NAVIGATION ----------
+  function updateMonthNav(){
+    $('monthNavLabel').textContent = monthLabel(viewMonth);
+    $('nextMonthBtn').disabled = isCurrentMonth(viewMonth);
+    $('monthNav').style.display = periodMode === 'month' ? 'flex' : 'none';
+  }
+
+  document.querySelectorAll('#periodModeToggle .chip').forEach(chip=>{
     chip.addEventListener('click', ()=>{
-      currentPeriod = chip.dataset.period;
-      document.querySelectorAll('.chip[data-period]').forEach(c=>c.classList.remove('active'));
-      chip.classList.add('active');
+      periodMode = chip.dataset.mode;
+      document.querySelectorAll('#periodModeToggle .chip').forEach(c=> c.classList.toggle('active', c===chip));
       txnExpanded = false;
+      updateMonthNav();
       render();
     });
   });
+
+  $('prevMonthBtn').addEventListener('click', ()=>{
+    viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth()-1, 1);
+    txnExpanded = false;
+    updateMonthNav();
+    render();
+  });
+  $('nextMonthBtn').addEventListener('click', ()=>{
+    if (isCurrentMonth(viewMonth)) return;
+    viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth()+1, 1);
+    txnExpanded = false;
+    updateMonthNav();
+    render();
+  });
+
+  updateMonthNav();
 
   // ---------- CURRENCY SHEET ----------
   function buildCurList(filterText){
