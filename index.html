@@ -118,8 +118,17 @@
     color:var(--text-muted);
     letter-spacing:0.08em;
     text-transform:uppercase;
-    margin:0 0 8px;
+    margin:0;
   }
+  .ledger-top-row{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:8px;
+  }
+  .hide-balance-btn{
+    background:none; border:none; font-size:16px; line-height:1;
+    padding:4px 6px; color:var(--text-muted); flex-shrink:0;
+  }
+  .hide-balance-btn:active{ transform:scale(0.9); }
   .ledger-amount{
     font-family:var(--font-display);
     font-weight:600;
@@ -381,6 +390,7 @@
   .cat-btn .em{ font-size:19px; display:block; margin-bottom:4px; }
   .cat-btn.active{ border-color:var(--gold); background:rgba(227,178,60,0.14); color:var(--text); }
   .cat-btn.add{ border-style:dashed; color:var(--text-muted); }
+  .cat-hint{ font-size:11px; color:var(--text-muted); margin:8px 2px 0; }
 
   .field-label-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
   .field-label-row label{ margin-bottom:0; }
@@ -474,7 +484,10 @@
 
   <div class="ledger-wrap">
     <div class="ledger-card">
-      <p class="ledger-label" id="ledgerLabel">Bilancio di questo mese</p>
+      <div class="ledger-top-row">
+        <p class="ledger-label" id="ledgerLabel">Bilancio di questo mese</p>
+        <button type="button" class="hide-balance-btn" id="hideBalanceBtn" aria-label="Nascondi importi">👁️</button>
+      </div>
       <p class="ledger-amount" id="ledgerAmount">—</p>
       <div class="ledger-stats">
         <div class="stat stat-income">
@@ -599,6 +612,7 @@
         <button type="button" class="manage-link" id="manageCatsBtn">Gestisci</button>
       </div>
       <div class="cat-grid" id="catGrid"></div>
+      <p class="cat-hint">Tieni premuto su una categoria per modificarla</p>
     </div>
     <div class="field">
       <label for="dateInput">Data</label>
@@ -756,11 +770,12 @@
 
   let transactions = [];       // {id, type, amount, currency, category, date, note, createdAt}
   let categories = {expense:[], income:[], investment:[]};
-  let settings = {currency:'EUR'};
+  let settings = {currency:'EUR', hideBalance:false};
   let exchangeRates = {EUR:1}; // code -> units per 1 EUR
   let ratesMeta = {fetchedAt:0, rateDate:null, source:'fallback'};
   let periodMode = 'month';
   let viewMonth = new Date();
+  let hideBalance = false;
   let selectedType = 'expense';
   let selectedCategory = null;
   let manageType = 'expense';
@@ -954,8 +969,11 @@
     }catch(e){ transactions = []; }
     try{
       const raw = localStorage.getItem('settings');
-      settings = raw ? JSON.parse(raw) : {currency:'EUR'};
-    }catch(e){ settings = {currency:'EUR'}; }
+      settings = raw ? JSON.parse(raw) : {currency:'EUR', hideBalance:false};
+      if (typeof settings.hideBalance !== 'boolean') settings.hideBalance = false;
+    }catch(e){ settings = {currency:'EUR', hideBalance:false}; }
+    hideBalance = settings.hideBalance;
+    applyHideBalanceUI();
 
     await ensureRates(false);
     render();
@@ -1086,10 +1104,10 @@
     const totals = computeTotals(filtered, cur);
 
     $('ledgerLabel').textContent = periodMode === 'month' ? 'Bilancio di ' + monthLabel(viewMonth) : 'Bilancio totale';
-    $('ledgerAmount').textContent = fmt(totals.balance, cur);
-    $('ledgerAmount').style.color = totals.balance >= 0 ? 'var(--sage)' : 'var(--coral)';
-    $('incomeAmount').textContent = '+ ' + fmt(totals.income, cur);
-    $('expenseAmount').textContent = '− ' + fmt(totals.expense, cur);
+    $('ledgerAmount').textContent = hideBalance ? '••••••' : fmt(totals.balance, cur);
+    $('ledgerAmount').style.color = hideBalance ? 'var(--text-muted)' : (totals.balance >= 0 ? 'var(--sage)' : 'var(--coral)');
+    $('incomeAmount').textContent = hideBalance ? '••••' : '+ ' + fmt(totals.income, cur);
+    $('expenseAmount').textContent = hideBalance ? '••••' : '− ' + fmt(totals.expense, cur);
     $('ledgerMeta').textContent = filtered.length + (filtered.length===1 ? ' transazione registrata' : ' transazioni registrate');
 
     renderCategoryChart(filtered, cur);
@@ -1248,7 +1266,7 @@
   });
 
   function renderPortfolio(cur){
-    $('portfolioTotal').textContent = fmt(investmentTotal(cur), cur);
+    $('portfolioTotal').textContent = hideBalance ? '••••••' : fmt(investmentTotal(cur), cur);
     renderPortfolioChart(cur);
     renderInvestments(cur);
   }
@@ -1335,6 +1353,32 @@
   });
 
   // ---------- ADD TRANSACTION SHEET ----------
+  // Tieni premuto (o mouse premuto a lungo) per modificare una categoria
+  // direttamente dalla griglia, senza dover passare da "Gestisci".
+  let longPressTimer = null;
+  let longPressFired = false;
+
+  function attachLongPress(el, callback){
+    const start = () => {
+      longPressFired = false;
+      longPressTimer = setTimeout(()=>{
+        longPressFired = true;
+        if (navigator.vibrate) navigator.vibrate(12);
+        callback();
+      }, 500);
+    };
+    const cancel = () => {
+      if (longPressTimer){ clearTimeout(longPressTimer); longPressTimer = null; }
+    };
+    el.addEventListener('touchstart', start, {passive:true});
+    el.addEventListener('touchend', cancel);
+    el.addEventListener('touchmove', cancel);
+    el.addEventListener('mousedown', start);
+    el.addEventListener('mouseup', cancel);
+    el.addEventListener('mouseleave', cancel);
+    el.addEventListener('contextmenu', (e)=> e.preventDefault());
+  }
+
   function buildCatGrid(type){
     const cats = categories[type] || [];
     const grid = $('catGrid');
@@ -1346,10 +1390,15 @@
 
     grid.querySelectorAll('.cat-btn[data-cat]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
+        if (longPressFired){ longPressFired = false; return; }
         selectedCategory = btn.dataset.cat;
         grid.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         validateAddForm();
+      });
+      attachLongPress(btn, ()=>{
+        const cat = (categories[type]||[]).find(c=>c.id===btn.dataset.cat);
+        if (cat) openCategoryEditor(type, cat);
       });
     });
     const addTile = $('addCatTile');
@@ -1675,6 +1724,20 @@
   });
 
   updateMonthNav();
+
+  // ---------- HIDE BALANCE ----------
+  function applyHideBalanceUI(){
+    $('hideBalanceBtn').textContent = hideBalance ? '🙈' : '👁️';
+    $('hideBalanceBtn').setAttribute('aria-label', hideBalance ? 'Mostra importi' : 'Nascondi importi');
+  }
+
+  $('hideBalanceBtn').addEventListener('click', async ()=>{
+    hideBalance = !hideBalance;
+    settings.hideBalance = hideBalance;
+    applyHideBalanceUI();
+    await persistSettings();
+    render();
+  });
 
   // ---------- CURRENCY SHEET ----------
   function buildCurList(filterText){
