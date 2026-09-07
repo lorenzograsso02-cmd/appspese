@@ -140,25 +140,33 @@
   }
   .ledger-stats{
     display:flex;
-    gap:16px;
+    gap:10px;
     margin-top:16px;
     padding-top:14px;
     border-top:1px dashed var(--line);
   }
-  .stat{ flex:1; }
+  .stat{ flex:1; min-width:0; }
   .stat-label{
     display:block;
-    font-size:11px;
+    font-size:10.5px;
     color:var(--text-muted);
     margin-bottom:4px;
+    white-space:nowrap;
   }
   .stat-value{
     font-family:var(--font-mono);
     font-weight:700;
-    font-size:15px;
+    font-size:14px;
   }
   .stat-income .stat-value{ color:var(--sage); }
   .stat-expense .stat-value{ color:var(--coral); }
+  .stat-invested .stat-value{ color:var(--gold); }
+  .ledger-note{
+    font-size:10.5px;
+    color:var(--text-muted);
+    font-style:italic;
+    margin:8px 0 0;
+  }
   .ledger-meta{
     margin-top:12px;
     font-size:12.5px;
@@ -498,7 +506,12 @@
           <span class="stat-label">↓ Uscite</span>
           <span class="stat-value" id="expenseAmount">—</span>
         </div>
+        <div class="stat stat-invested">
+          <span class="stat-label">📈 Investito</span>
+          <span class="stat-value" id="investedAmount">—</span>
+        </div>
       </div>
+      <p class="ledger-note" id="ledgerNote" style="display:none;">Il Bilancio non include gli investimenti.</p>
       <p class="ledger-meta" id="ledgerMeta">Caricamento…</p>
     </div>
   </div>
@@ -524,6 +537,21 @@
       <div class="donut-row" id="donutRow" style="display:none;">
         <div class="donut-canvas-wrap"><canvas id="donutChart"></canvas></div>
         <div class="legend" id="legendList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Guadagni per categoria</h2>
+    <p class="section-sub">Suddivisione delle entrate nel periodo selezionato</p>
+    <div class="card" id="incomeCategoryCard">
+      <div class="empty" id="incomeCategoryEmpty">
+        <span class="glyph">💰</span>
+        Nessun guadagno registrato per questo periodo.
+      </div>
+      <div class="donut-row" id="incomeDonutRow" style="display:none;">
+        <div class="donut-canvas-wrap"><canvas id="incomeDonutChart"></canvas></div>
+        <div class="legend" id="incomeLegendList"></div>
       </div>
     </div>
   </div>
@@ -557,8 +585,18 @@
     <h2 class="section-title">Portafoglio</h2>
     <p class="section-sub">Il totale investito, suddiviso per categoria</p>
     <div class="card">
-      <p class="section-sub" style="margin-bottom:6px;">Totale investito</p>
+      <p class="section-sub" style="margin-bottom:6px;">Valore attuale</p>
       <p class="portfolio-amount" id="portfolioTotal">—</p>
+      <div class="ledger-stats" id="portfolioStatsRow" style="display:none;">
+        <div class="stat">
+          <span class="stat-label">Versato</span>
+          <span class="stat-value" id="portfolioDeposited" style="color:var(--text);">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Guadagno/Perdita</span>
+          <span class="stat-value" id="portfolioReturns">—</span>
+        </div>
+      </div>
       <div class="empty" id="portfolioEmpty">
         <span class="glyph">📈</span>
         Nessun investimento registrato ancora.
@@ -597,6 +635,21 @@
       <button type="button" class="type-btn active" data-type="expense"><span class="ti">📤</span>Spesa</button>
       <button type="button" class="type-btn" data-type="income"><span class="ti">📥</span>Guadagno</button>
       <button type="button" class="type-btn" data-type="investment"><span class="ti">📈</span>Investim.</button>
+    </div>
+
+    <div class="field" id="investFlowField" style="display:none;">
+      <label>Tipo di movimento</label>
+      <div class="mini-toggle" id="investFlowToggle">
+        <button type="button" class="mini-chip active" data-flow="deposit">Versamento</button>
+        <button type="button" class="mini-chip" data-flow="return">Guadagno/Perdita</button>
+      </div>
+    </div>
+    <div class="field" id="returnSignField" style="display:none;">
+      <label>Segno</label>
+      <div class="mini-toggle" id="returnSignToggle">
+        <button type="button" class="mini-chip active" data-sign="gain">📈 Guadagno</button>
+        <button type="button" class="mini-chip" data-sign="loss">📉 Perdita</button>
+      </div>
     </div>
 
     <div class="field">
@@ -781,6 +834,8 @@
   let manageType = 'expense';
   let editingTxnId = null;
   let formCurrency = 'EUR';
+  let investFlow = 'deposit';   // 'deposit' | 'return'
+  let returnSign = 'gain';      // 'gain' | 'loss' (solo quando investFlow === 'return')
   let trendGranularity = 'month';
   let txnExpanded = false;
   let investExpanded = false;
@@ -790,6 +845,7 @@
   let catEditorIcon = '🏷️';
   let catEditorColor = '#8A93AD';
   let donutChart = null;
+  let incomeChart = null;
   let barChart = null;
   let portfolioChart = null;
 
@@ -1031,6 +1087,27 @@
     })).filter(c=>c.amount>0).sort((a,b)=>b.amount-a.amount);
   }
 
+  function incomeBreakdown(list, targetCur){
+    const map = {};
+    list.filter(t=>t.type==='income').forEach(t=>{
+      const amt = convert(t.amount, t.currency, targetCur);
+      map[t.category] = (map[t.category]||0) + amt;
+    });
+    const total = Object.values(map).reduce((a,b)=>a+b,0);
+    return categories.income.map(c=>({
+      ...c,
+      amount: map[c.id]||0,
+      pct: total>0 ? (map[c.id]||0)/total*100 : 0
+    })).filter(c=>c.amount>0).sort((a,b)=>b.amount-a.amount);
+  }
+
+  // Totale investito nel SOLO periodo selezionato (mese/tutto), usato per la
+  // riga informativa "Investito" nella card Bilancio. Non va confuso con
+  // investmentTotal(), che e' sempre cumulativo su tutta la vita del portafoglio.
+  function periodInvestmentTotal(list, cur){
+    return list.filter(t=>t.type==='investment').reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
+  }
+
   function monthlyTrend(targetCur, months){
     const now = new Date();
     const buckets = [];
@@ -1078,7 +1155,19 @@
   }
 
   function investmentTotal(cur){
+    // Valore attuale del portafoglio: somma di versamenti + rendimenti
+    // (i rendimenti negativi, cioe' le perdite, riducono naturalmente il totale).
     return getInvestments().reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
+  }
+
+  function investmentDeposited(cur){
+    return getInvestments().filter(t=>(t.flow||'deposit')==='deposit')
+      .reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
+  }
+
+  function investmentReturns(cur){
+    return getInvestments().filter(t=>t.flow==='return')
+      .reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
   }
 
   function investmentBreakdown(targetCur){
@@ -1102,15 +1191,19 @@
 
     const filtered = getFiltered();
     const totals = computeTotals(filtered, cur);
+    const investedThisPeriod = periodInvestmentTotal(filtered, cur);
 
     $('ledgerLabel').textContent = periodMode === 'month' ? 'Bilancio di ' + monthLabel(viewMonth) : 'Bilancio totale';
     $('ledgerAmount').textContent = hideBalance ? '••••••' : fmt(totals.balance, cur);
     $('ledgerAmount').style.color = hideBalance ? 'var(--text-muted)' : (totals.balance >= 0 ? 'var(--sage)' : 'var(--coral)');
     $('incomeAmount').textContent = hideBalance ? '••••' : '+ ' + fmt(totals.income, cur);
     $('expenseAmount').textContent = hideBalance ? '••••' : '− ' + fmt(totals.expense, cur);
+    $('investedAmount').textContent = hideBalance ? '••••' : fmt(investedThisPeriod, cur);
+    $('ledgerNote').style.display = investedThisPeriod > 0 ? 'block' : 'none';
     $('ledgerMeta').textContent = filtered.length + (filtered.length===1 ? ' transazione registrata' : ' transazioni registrate');
 
     renderCategoryChart(filtered, cur);
+    renderIncomeChart(filtered, cur);
     renderTrendChart(cur);
     renderTransactions(filtered, cur);
     renderPortfolio(cur);
@@ -1168,6 +1261,58 @@
     `).join('');
   }
 
+  function renderIncomeChart(filtered, cur){
+    const breakdown = incomeBreakdown(filtered, cur);
+    const empty = $('incomeCategoryEmpty');
+    const row = $('incomeDonutRow');
+    if (breakdown.length === 0){
+      empty.style.display = 'block';
+      row.style.display = 'none';
+      if (incomeChart){ incomeChart.destroy(); incomeChart = null; }
+      return;
+    }
+    empty.style.display = 'none';
+    row.style.display = 'flex';
+
+    const ctx = document.getElementById('incomeDonutChart').getContext('2d');
+    const data = {
+      labels: breakdown.map(b=>b.label),
+      datasets: [{
+        data: breakdown.map(b=>b.amount),
+        backgroundColor: breakdown.map(b=>b.color),
+        borderColor: '#16223F',
+        borderWidth: 2,
+      }]
+    };
+    if (incomeChart){
+      incomeChart.data = data;
+      incomeChart.update();
+    } else {
+      incomeChart = new Chart(ctx, {
+        type:'doughnut',
+        data,
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          cutout:'68%',
+          plugins:{ legend:{display:false}, tooltip:{
+            callbacks:{ label:(c)=> ' ' + fmt(c.parsed, cur) }
+          }},
+          animation:{ duration:400 }
+        }
+      });
+    }
+
+    const legend2 = $('incomeLegendList');
+    legend2.innerHTML = breakdown.map(b => `
+      <div class="legend-item">
+        <span class="legend-dot" style="background:${b.color}"></span>
+        <span class="legend-label">${b.icon} ${b.label}</span>
+        <span class="legend-pct">${b.pct.toFixed(0)}%</span>
+      </div>
+    `).join('');
+  }
+
   function renderTrendChart(cur){
     const trend = trendGranularity === 'week' ? weeklyTrend(cur, 8) : monthlyTrend(cur, 6);
     $('trendSub').textContent = trendGranularity === 'week' ? 'Entrate e uscite, ultime 8 settimane' : 'Entrate e uscite, ultimi 6 mesi';
@@ -1217,16 +1362,23 @@
     let sign = '', amtClass = '';
     if (t.type === 'income'){ sign = '+ '; amtClass = 'is-income'; }
     else if (t.type === 'expense'){ sign = '− '; amtClass = 'is-expense'; }
-    else { sign = ''; amtClass = 'is-investment'; }
+    else if (t.type === 'investment' && t.flow === 'return'){
+      sign = converted >= 0 ? '+ ' : '− ';
+      amtClass = converted >= 0 ? 'is-income' : 'is-expense';
+    } else {
+      sign = ''; amtClass = 'is-investment';
+    }
+    const isReturn = t.type === 'investment' && t.flow === 'return';
+    const catLine = c.label + (isReturn ? ' · Rendimento' : '');
     return `
       <div class="txn-row" data-id="${t.id}">
         <div class="txn-icon" style="background:${c.color}33; color:${c.color};">${c.icon}</div>
         <div class="txn-info">
-          <div class="txn-cat">${c.label}</div>
+          <div class="txn-cat">${catLine}</div>
           <div class="txn-note">${t.note ? t.note : fmtDate(t.date)}</div>
           ${t.note ? `<div class="txn-date">${fmtDate(t.date)}</div>` : ''}
         </div>
-        <div class="txn-amount ${amtClass}">${sign}${fmt(converted, cur)}</div>
+        <div class="txn-amount ${amtClass}">${sign}${fmt(Math.abs(converted), cur)}</div>
         <button class="txn-del" data-del="${t.id}" aria-label="Elimina">✕</button>
       </div>
     `;
@@ -1266,7 +1418,28 @@
   });
 
   function renderPortfolio(cur){
+    const deposited = investmentDeposited(cur);
+    const returns = investmentReturns(cur);
+    const hasData = getInvestments().length > 0;
+
     $('portfolioTotal').textContent = hideBalance ? '••••••' : fmt(investmentTotal(cur), cur);
+    $('portfolioStatsRow').style.display = hasData ? 'flex' : 'none';
+
+    if (hasData){
+      $('portfolioDeposited').textContent = hideBalance ? '••••' : fmt(deposited, cur);
+      const returnsEl = $('portfolioReturns');
+      if (hideBalance){
+        returnsEl.textContent = '••••';
+        returnsEl.style.color = 'var(--text-muted)';
+      } else {
+        const sign = returns >= 0 ? '+ ' : '− ';
+        const pct = deposited > 0 ? (returns / deposited * 100) : 0;
+        const pctStr = deposited > 0 ? ` (${sign}${Math.abs(pct).toFixed(1)}%)` : '';
+        returnsEl.textContent = sign + fmt(Math.abs(returns), cur) + pctStr;
+        returnsEl.style.color = returns >= 0 ? 'var(--sage)' : 'var(--coral)';
+      }
+    }
+
     renderPortfolioChart(cur);
     renderInvestments(cur);
   }
@@ -1417,6 +1590,16 @@
     $('amountRow').classList.remove('income','investment');
     if (type === 'income') $('amountRow').classList.add('income');
     if (type === 'investment') $('amountRow').classList.add('investment');
+
+    $('investFlowField').style.display = type === 'investment' ? 'block' : 'none';
+    if (type !== 'investment'){
+      investFlow = 'deposit';
+      returnSign = 'gain';
+      $('returnSignField').style.display = 'none';
+      document.querySelectorAll('#investFlowToggle .mini-chip').forEach(b=> b.classList.toggle('active', b.dataset.flow==='deposit'));
+      document.querySelectorAll('#returnSignToggle .mini-chip').forEach(b=> b.classList.toggle('active', b.dataset.sign==='gain'));
+    }
+
     selectedCategory = null;
     buildCatGrid(type);
     validateAddForm();
@@ -1424,6 +1607,21 @@
 
   document.querySelectorAll('#typeToggle .type-btn').forEach(btn=>{
     btn.addEventListener('click', ()=> setType(btn.dataset.type));
+  });
+
+  document.querySelectorAll('#investFlowToggle .mini-chip').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      investFlow = btn.dataset.flow;
+      document.querySelectorAll('#investFlowToggle .mini-chip').forEach(b=> b.classList.toggle('active', b===btn));
+      $('returnSignField').style.display = investFlow === 'return' ? 'block' : 'none';
+    });
+  });
+
+  document.querySelectorAll('#returnSignToggle .mini-chip').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      returnSign = btn.dataset.sign;
+      document.querySelectorAll('#returnSignToggle .mini-chip').forEach(b=> b.classList.toggle('active', b===btn));
+    });
   });
 
   function validateAddForm(){
@@ -1455,7 +1653,18 @@
     formCurrency = tx.currency;
     setType(tx.type);
     $('sheetTitle').textContent = tx.type === 'income' ? 'Modifica guadagno' : (tx.type === 'investment' ? 'Modifica investimento' : 'Modifica spesa');
-    $('amountInput').value = tx.amount;
+
+    if (tx.type === 'investment'){
+      investFlow = tx.flow || 'deposit';
+      returnSign = tx.amount < 0 ? 'loss' : 'gain';
+      document.querySelectorAll('#investFlowToggle .mini-chip').forEach(b=> b.classList.toggle('active', b.dataset.flow===investFlow));
+      $('returnSignField').style.display = investFlow === 'return' ? 'block' : 'none';
+      document.querySelectorAll('#returnSignToggle .mini-chip').forEach(b=> b.classList.toggle('active', b.dataset.sign===returnSign));
+      $('amountInput').value = Math.abs(tx.amount);
+    } else {
+      $('amountInput').value = tx.amount;
+    }
+
     $('noteInput').value = tx.note || '';
     $('dateInput').value = tx.date;
     selectedCategory = tx.category;
@@ -1480,15 +1689,23 @@
     const amount = parseFloat($('amountInput').value);
     if (!(amount > 0) || !selectedCategory) return;
 
+    let finalAmount = amount;
+    let flow;
+    if (selectedType === 'investment'){
+      flow = investFlow;
+      if (investFlow === 'return' && returnSign === 'loss') finalAmount = -Math.abs(amount);
+    }
+
     if (editingTxnId){
       const tx = transactions.find(t=>t.id===editingTxnId);
       if (tx){
         tx.type = selectedType;
-        tx.amount = amount;
+        tx.amount = finalAmount;
         tx.currency = formCurrency;
         tx.category = selectedCategory;
         tx.date = $('dateInput').value || todayStr();
         tx.note = $('noteInput').value.trim();
+        if (selectedType === 'investment') tx.flow = flow; else delete tx.flow;
       }
       await persistTransactions();
       closeSheet('addOverlay');
@@ -1498,18 +1715,22 @@
       const tx = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2,7),
         type: selectedType,
-        amount,
+        amount: finalAmount,
         currency: formCurrency,
         category: selectedCategory,
         date: $('dateInput').value || todayStr(),
         note: $('noteInput').value.trim(),
         createdAt: Date.now(),
       };
+      if (selectedType === 'investment') tx.flow = flow;
       transactions.push(tx);
       await persistTransactions();
       closeSheet('addOverlay');
       render();
-      showToast(selectedType === 'income' ? 'Guadagno aggiunto' : (selectedType === 'investment' ? 'Investimento aggiunto' : 'Spesa aggiunta'));
+      let msg = 'Spesa aggiunta';
+      if (selectedType === 'income') msg = 'Guadagno aggiunto';
+      else if (selectedType === 'investment') msg = investFlow === 'return' ? (returnSign === 'loss' ? 'Perdita registrata' : 'Guadagno registrato') : 'Versamento aggiunto';
+      showToast(msg);
     }
   });
 
