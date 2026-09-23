@@ -244,14 +244,34 @@
   .legend-label{ flex:1; color:var(--text); }
   .legend-pct{ color:var(--text-muted); font-family:var(--font-mono); font-size:12px; }
 
-  .bar-canvas-wrap{ width:100%; height:240px; }
+  .bar-canvas-wrap{ width:100%; height:250px; }
+  .chart-note{
+    font-size:11px; color:var(--text-muted); font-style:italic;
+    margin:10px 0 0; text-align:center;
+  }
 
-  .mini-toggle{ display:flex; gap:8px; margin-bottom:14px; }
+  .mini-toggle{ display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
   .mini-chip{
     padding:8px 14px; border-radius:999px; border:1px solid var(--line);
     background:var(--surface-2); color:var(--text-muted); font-size:12.5px; font-weight:600;
   }
   .mini-chip.active{ background:var(--gold); border-color:var(--gold); color:#1A1200; }
+
+  /* STATISTICS */
+  .curio-list{ display:flex; flex-direction:column; }
+  .curio-row{
+    display:flex; align-items:center; gap:12px;
+    padding:13px 0; border-bottom:1px solid var(--line);
+  }
+  .curio-row:last-child{ border-bottom:none; }
+  .curio-icon{
+    width:38px; height:38px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:17px;
+  }
+  .curio-info{ flex:1; min-width:0; }
+  .curio-label{ font-size:12px; color:var(--text-muted); margin-bottom:2px; }
+  .curio-value{ font-size:14px; font-weight:600; }
+  .curio-sub{ font-family:var(--font-mono); font-size:12px; color:var(--text-muted); white-space:nowrap; text-align:right; }
 
   /* EMPTY STATES */
   .empty{
@@ -562,9 +582,36 @@
     <div class="mini-toggle" id="trendToggle">
       <button type="button" class="mini-chip active" data-gran="month">Mensile</button>
       <button type="button" class="mini-chip" data-gran="week">Settimanale</button>
+      <button type="button" class="mini-chip" data-gran="day">Giornaliero</button>
     </div>
     <div class="card">
       <div class="bar-canvas-wrap"><canvas id="barChart"></canvas></div>
+      <p class="chart-note" id="trendNote"></p>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">Statistiche</h2>
+    <p class="section-sub">Spesa media e curiosità sui tuoi dati</p>
+    <div class="card">
+      <p class="section-sub" style="margin-bottom:6px;">Spesa media al giorno</p>
+      <div class="ledger-stats" style="border-top:none; margin-top:0; padding-top:0;">
+        <div class="stat">
+          <span class="stat-label" id="avgMonthLabel">In questo mese</span>
+          <span class="stat-value" id="avgMonthValue" style="color:var(--coral); font-size:16px;">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Da sempre</span>
+          <span class="stat-value" id="avgAllValue" style="color:var(--coral); font-size:16px;">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px;">
+      <div class="empty" id="curioEmpty">
+        <span class="glyph">✨</span>
+        Aggiungi qualche spesa per scoprire le tue curiosità.
+      </div>
+      <div class="curio-list" id="curioList"></div>
     </div>
   </div>
 
@@ -820,6 +867,7 @@
 
   const MONTHS_IT = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
   const MONTHS_IT_FULL = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+  const WEEKDAYS_IT_FULL = ['domenica','lunedì','martedì','mercoledì','giovedì','venerdì','sabato']; // getDay(): 0=domenica
 
   let transactions = [];       // {id, type, amount, currency, category, date, note, createdAt}
   let categories = {expense:[], income:[], investment:[]};
@@ -860,6 +908,12 @@
     const rt = exchangeRates[to] != null ? exchangeRates[to] : 1;
     if (from === to) return amount;
     return (amount / rf) * rt;
+  }
+
+  function hexToRgba(hex, alpha){
+    const h = hex.replace('#','');
+    const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+    return `rgba(${r},${g},${b},${alpha})`;
   }
 
   function fmt(amount, code){
@@ -1149,6 +1203,23 @@
     return buckets;
   }
 
+  function dailyTrend(targetCur, days){
+    const today = new Date();
+    const buckets = [];
+    for (let i=days-1;i>=0;i--){
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate()-i);
+      buckets.push({ ymd: localDateStr(d), label: d.getDate() + ' ' + MONTHS_IT[d.getMonth()], income:0, expense:0 });
+    }
+    transactions.forEach(t=>{
+      if (t.type === 'investment') return;
+      const b = buckets.find(b=>b.ymd===t.date);
+      if (!b) return;
+      const amt = convert(t.amount, t.currency, targetCur);
+      if (t.type === 'income') b.income += amt; else b.expense += amt;
+    });
+    return buckets;
+  }
+
   // ---------- PORTFOLIO (INVESTIMENTI) ----------
   function getInvestments(){
     return transactions.filter(t=>t.type==='investment');
@@ -1184,6 +1255,160 @@
     })).filter(c=>c.amount>0).sort((a,b)=>b.amount-a.amount);
   }
 
+  // ---------- STATISTICHE E CURIOSITÀ ----------
+  function daysInMonth(d){
+    return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  }
+
+  // Spesa media al giorno nel mese attualmente sfogliato (in alto nell'app).
+  // Se e' il mese in corso, divide solo per i giorni gia' trascorsi; se e'
+  // un mese passato, divide per tutti i suoi giorni.
+  function avgDailySpendForMonth(cur, monthDate){
+    const ym = localYmStr(monthDate);
+    const monthExpenses = transactions.filter(t=>t.type==='expense' && t.date.slice(0,7)===ym);
+    const total = monthExpenses.reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
+    const elapsedDays = isCurrentMonth(monthDate) ? new Date().getDate() : daysInMonth(monthDate);
+    if (total === 0) return null;
+    return total / Math.max(1, elapsedDays);
+  }
+
+  // Spesa media al giorno su tutto il periodo tracciato (dalla prima
+  // transazione registrata, di qualsiasi tipo, fino a oggi).
+  function avgDailySpendAllTime(cur){
+    if (transactions.length === 0) return null;
+    const allExpenses = transactions.filter(t=>t.type==='expense');
+    if (allExpenses.length === 0) return null;
+    const minDate = transactions.reduce((min,t)=> t.date < min ? t.date : min, transactions[0].date);
+    const start = new Date(minDate + 'T00:00:00');
+    const today = new Date();
+    const daySpan = Math.round((today - start) / 86400000) + 1;
+    const total = allExpenses.reduce((s,t)=> s + convert(t.amount, t.currency, cur), 0);
+    return total / Math.max(1, daySpan);
+  }
+
+  // Curiosita' calcolate SEMPRE su tutti i dati registrati ("in assoluto"),
+  // indipendentemente dal mese/periodo sfogliato altrove nell'app.
+  function computeCuriosities(cur){
+    const allExpenses = transactions.filter(t=>t.type==='expense');
+    if (allExpenses.length === 0) return [];
+    const items = [];
+
+    // 1. Giorno con la spesa piu' alta in assoluto (somma di tutte le spese di quel giorno).
+    const byDate = {};
+    allExpenses.forEach(t=>{ byDate[t.date] = (byDate[t.date]||0) + convert(t.amount, t.currency, cur); });
+    let topDate = null, topDateAmt = -Infinity;
+    Object.entries(byDate).forEach(([d,amt])=>{ if (amt > topDateAmt){ topDateAmt = amt; topDate = d; } });
+    if (topDate){
+      const d = new Date(topDate + 'T00:00:00');
+      const label = d.getDate() + ' ' + MONTHS_IT_FULL[d.getMonth()] + ' ' + d.getFullYear();
+      items.push({ icon:'📅', color:'#E2725B', label:'Giorno di spesa più alto', value:label, sub:fmt(topDateAmt,cur) });
+    }
+
+    // 2. Categoria di spesa piu' costosa in assoluto.
+    const byCat = {};
+    allExpenses.forEach(t=>{ byCat[t.category] = (byCat[t.category]||0) + convert(t.amount, t.currency, cur); });
+    let topCatId = null, topCatAmt = -Infinity;
+    Object.entries(byCat).forEach(([id,amt])=>{ if (amt > topCatAmt){ topCatAmt = amt; topCatId = id; } });
+    if (topCatId){
+      const c = catById(topCatId) || FALLBACK_CAT;
+      items.push({ icon:c.icon, color:c.color, label:'Categoria più costosa', value:c.label, sub:fmt(topCatAmt,cur) });
+    }
+
+    // 3. Mese con la spesa complessiva piu' alta.
+    const byMonth = {};
+    allExpenses.forEach(t=>{ const ym = t.date.slice(0,7); byMonth[ym] = (byMonth[ym]||0) + convert(t.amount, t.currency, cur); });
+    let topYm = null, topYmAmt = -Infinity;
+    Object.entries(byMonth).forEach(([ym,amt])=>{ if (amt > topYmAmt){ topYmAmt = amt; topYm = ym; } });
+    if (topYm){
+      const [y,m] = topYm.split('-').map(Number);
+      items.push({ icon:'🗓️', color:'#E2725B', label:'Mese più caro', value: monthLabel(new Date(y, m-1, 1)), sub:fmt(topYmAmt,cur) });
+    }
+
+    // 4. Giorno della settimana in cui si spende di piu' IN MEDIA, calcolata
+    // sull'intero arco temporale tracciato (non solo sui giorni con spese).
+    const minDate = transactions.reduce((min,t)=> t.date < min ? t.date : min, transactions[0].date);
+    const start = new Date(minDate + 'T00:00:00');
+    const today = new Date();
+    const dayCount = [0,0,0,0,0,0,0];
+    for (let d = new Date(start); d <= today; d.setDate(d.getDate()+1)){
+      dayCount[d.getDay()]++;
+    }
+    const daySum = [0,0,0,0,0,0,0];
+    allExpenses.forEach(t=>{
+      const wd = new Date(t.date + 'T00:00:00').getDay();
+      daySum[wd] += convert(t.amount, t.currency, cur);
+    });
+    let topWd = -1, topWdAvg = -Infinity;
+    for (let wd=0; wd<7; wd++){
+      if (dayCount[wd] === 0) continue;
+      const avg = daySum[wd] / dayCount[wd];
+      if (avg > topWdAvg){ topWdAvg = avg; topWd = wd; }
+    }
+    if (topWd !== -1 && topWdAvg > 0){
+      const label = WEEKDAYS_IT_FULL[topWd].charAt(0).toUpperCase() + WEEKDAYS_IT_FULL[topWd].slice(1);
+      items.push({ icon:'📆', color:'#E2725B', label:'Giorno della settimana più costoso (in media)', value:label, sub:fmt(topWdAvg,cur)+'/giorno' });
+    }
+
+    return items;
+  }
+
+  function renderStatistics(cur){
+    $('avgMonthLabel').textContent = 'In ' + monthLabel(viewMonth).toLowerCase();
+    const avgMonth = avgDailySpendForMonth(cur, viewMonth);
+    $('avgMonthValue').textContent = hideBalance ? '••••' : (avgMonth == null ? '—' : fmt(avgMonth, cur) + '/g');
+
+    const avgAll = avgDailySpendAllTime(cur);
+    $('avgAllValue').textContent = hideBalance ? '••••' : (avgAll == null ? '—' : fmt(avgAll, cur) + '/g');
+
+    const curios = computeCuriosities(cur);
+    const empty = $('curioEmpty');
+    const list = $('curioList');
+    if (curios.length === 0){
+      empty.style.display = 'block';
+      list.innerHTML = '';
+      return;
+    }
+    empty.style.display = 'none';
+    list.innerHTML = curios.map(item => `
+      <div class="curio-row">
+        <div class="curio-icon" style="background:${item.color}33; color:${item.color};">${item.icon}</div>
+        <div class="curio-info">
+          <div class="curio-label">${item.label}</div>
+          <div class="curio-value">${item.value}</div>
+        </div>
+        <div class="curio-sub">${hideBalance ? '••••' : item.sub}</div>
+      </div>
+    `).join('');
+  }
+
+  // Plugin Chart.js: disegna un totale al centro dei grafici a ciambella,
+  // cosi' il numero piu' importante e' leggibile a colpo d'occhio senza
+  // dover incrociare la legenda. Attivato passando options.plugins.centerText.
+  if (window.Chart){
+    Chart.register({
+      id: 'centerText',
+      afterDraw(chart){
+        const opts = chart.config.options && chart.config.options.plugins && chart.config.options.plugins.centerText;
+        if (!opts || !opts.value) return;
+        const { ctx, chartArea } = chart;
+        const cx = (chartArea.left + chartArea.right) / 2;
+        const cy = (chartArea.top + chartArea.bottom) / 2;
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        if (opts.label){
+          ctx.font = '600 9.5px Inter, sans-serif';
+          ctx.fillStyle = '#94A0C2';
+          ctx.fillText(opts.label, cx, cy - 9);
+        }
+        ctx.font = '700 14px "Space Mono", monospace';
+        ctx.fillStyle = opts.color || '#F4EFE3';
+        ctx.fillText(opts.value, cx, cy + (opts.label ? 7 : 0));
+        ctx.restore();
+      }
+    });
+  }
+
   // ---------- RENDER ----------
   function render(){
     const cur = settings.currency;
@@ -1205,6 +1430,7 @@
     renderCategoryChart(filtered, cur);
     renderIncomeChart(filtered, cur);
     renderTrendChart(cur);
+    renderStatistics(cur);
     renderTransactions(filtered, cur);
     renderPortfolio(cur);
   }
@@ -1223,6 +1449,7 @@
     row.style.display = 'flex';
 
     const ctx = document.getElementById('donutChart').getContext('2d');
+    const total = breakdown.reduce((s,b)=>s+b.amount,0);
     const data = {
       labels: breakdown.map(b=>b.label),
       datasets: [{
@@ -1232,8 +1459,10 @@
         borderWidth: 2,
       }]
     };
+    const centerText = { label:'Totale', value: fmt(total, cur), color:'#F4EFE3' };
     if (donutChart){
       donutChart.data = data;
+      donutChart.options.plugins.centerText = centerText;
       donutChart.update();
     } else {
       donutChart = new Chart(ctx, {
@@ -1242,8 +1471,8 @@
         options:{
           responsive:true,
           maintainAspectRatio:false,
-          cutout:'68%',
-          plugins:{ legend:{display:false}, tooltip:{
+          cutout:'64%',
+          plugins:{ legend:{display:false}, centerText, tooltip:{
             callbacks:{ label:(c)=> ' ' + fmt(c.parsed, cur) }
           }},
           animation:{ duration:400 }
@@ -1275,6 +1504,7 @@
     row.style.display = 'flex';
 
     const ctx = document.getElementById('incomeDonutChart').getContext('2d');
+    const total = breakdown.reduce((s,b)=>s+b.amount,0);
     const data = {
       labels: breakdown.map(b=>b.label),
       datasets: [{
@@ -1284,8 +1514,10 @@
         borderWidth: 2,
       }]
     };
+    const centerText = { label:'Totale', value: fmt(total, cur), color:'#F4EFE3' };
     if (incomeChart){
       incomeChart.data = data;
+      incomeChart.options.plugins.centerText = centerText;
       incomeChart.update();
     } else {
       incomeChart = new Chart(ctx, {
@@ -1294,8 +1526,8 @@
         options:{
           responsive:true,
           maintainAspectRatio:false,
-          cutout:'68%',
-          plugins:{ legend:{display:false}, tooltip:{
+          cutout:'64%',
+          plugins:{ legend:{display:false}, centerText, tooltip:{
             callbacks:{ label:(c)=> ' ' + fmt(c.parsed, cur) }
           }},
           animation:{ duration:400 }
@@ -1313,28 +1545,51 @@
     `).join('');
   }
 
+  // Colora l'ultima barra (il periodo piu' recente: oggi / questa settimana /
+  // questo mese) con opacita' ridotta, perche' e' l'unico bucket ancora "in
+  // corso" e non va confrontato ad armi pari con i periodi gia' conclusi.
+  function withCurrentBucketMuted(hex, count){
+    const arr = new Array(count).fill(hex);
+    if (count > 0) arr[count-1] = hexToRgba(hex, 0.45);
+    return arr;
+  }
+
   function renderTrendChart(cur){
-    const trend = trendGranularity === 'week' ? weeklyTrend(cur, 8) : monthlyTrend(cur, 6);
-    $('trendSub').textContent = trendGranularity === 'week' ? 'Entrate e uscite, ultime 8 settimane' : 'Entrate e uscite, ultimi 6 mesi';
+    let trend, subText, noteText;
+    if (trendGranularity === 'day'){
+      trend = dailyTrend(cur, 14);
+      subText = 'Entrate e uscite, ultimi 14 giorni';
+      noteText = 'La giornata di oggi è ancora in corso.';
+    } else if (trendGranularity === 'week'){
+      trend = weeklyTrend(cur, 8);
+      subText = 'Entrate e uscite, ultime 8 settimane';
+      noteText = 'La settimana in corso è ancora incompleta.';
+    } else {
+      trend = monthlyTrend(cur, 6);
+      subText = 'Entrate e uscite, ultimi 6 mesi';
+      noteText = 'Il mese in corso è ancora incompleto.';
+    }
+    $('trendSub').textContent = subText;
+    $('trendNote').textContent = noteText;
 
     const ctx = document.getElementById('barChart').getContext('2d');
     const data = {
       labels: trend.map(t=>t.label),
       datasets:[
-        { label:'Entrate', data: trend.map(t=>t.income),  backgroundColor:'#6FAE8B', borderRadius:6, maxBarThickness:26 },
-        { label:'Uscite',  data: trend.map(t=>t.expense), backgroundColor:'#E2725B', borderRadius:6, maxBarThickness:26 },
+        { label:'Entrate', data: trend.map(t=>t.income),  backgroundColor: withCurrentBucketMuted('#6FAE8B', trend.length), borderRadius:5, borderSkipped:false, categoryPercentage:0.68, barPercentage:0.9 },
+        { label:'Uscite',  data: trend.map(t=>t.expense), backgroundColor: withCurrentBucketMuted('#E2725B', trend.length), borderRadius:5, borderSkipped:false, categoryPercentage:0.68, barPercentage:0.9 },
       ]
     };
     const options = {
       responsive:true,
       maintainAspectRatio:false,
       plugins:{
-        legend:{ display:true, position:'bottom', labels:{ color:'#94A0C2', font:{family:'Inter', size:11.5}, boxWidth:10, boxHeight:10, padding:14 } },
+        legend:{ display:true, position:'bottom', labels:{ color:'#94A0C2', font:{family:'Inter', size:12}, boxWidth:10, boxHeight:10, padding:14 } },
         tooltip:{ callbacks:{ label:(c)=> ' ' + c.dataset.label + ': ' + fmt(c.parsed.y, cur) } }
       },
       scales:{
-        x:{ grid:{display:false}, ticks:{color:'#94A0C2', font:{family:'Space Mono', size:10.5}, maxRotation:0, autoSkip:true } },
-        y:{ grid:{color:'rgba(244,239,227,0.08)'}, ticks:{color:'#94A0C2', font:{size:10}, maxTicksLimit:5,
+        x:{ grid:{display:false}, ticks:{color:'#94A0C2', font:{family:'Space Mono', size:10.5}, maxRotation:0, autoSkip:true, maxTicksLimit: trendGranularity==='day' ? 7 : 8 } },
+        y:{ grid:{color:'rgba(244,239,227,0.08)'}, ticks:{color:'#94A0C2', font:{size:10.5}, maxTicksLimit:5,
               callback:(v)=> ((CURRENCY_META[cur]&&CURRENCY_META[cur].symbol)||cur) + v } }
       },
       animation:{ duration:400 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'le-mie-spese-v8';
+const CACHE_NAME = 'le-mie-spese-v9';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
